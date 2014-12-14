@@ -6,7 +6,11 @@
 
 ;; Requires
 (require racket/stxparam
-         (only-in racket/base [case rkt:case]))
+         (only-in racket/base [case rkt:case])
+         (for-syntax racket/base
+                     syntax/parse
+                     racket/syntax
+                     ))
 
 ;; Provides
 (provide (all-defined-out)
@@ -51,22 +55,27 @@
 ; (DEF FN name (args) body)
 ; (DEF MACRO name (pattern-vars) pattern)
 ; Defines new variables and functions (with help from FN)
+(begin-for-syntax
+  (define (bound-as-macro? id)
+    (procedure? (syntax-local-value id (λ () #f)))))
 (define-syntax def
-  (syntax-rules (macro fn)
-    [(_ macro name (args ... . rest) body0 bodyn ...) 
-     (define-syntax-rule (name args ... . rest) body0 bodyn ...)]
-    [(_ fn name (args ... . rest) body0 bodyn ...) 
-     (define (name args ... . rest) body0 bodyn ...)]
-    [(_ name contents) (define name contents)]))
-
-; DEF literals
-(define-syntax-parameter macro 
   (lambda (stx)
-    (raise-syntax-error (syntax-e stx) "macro must be used with def")))
-;(define-syntax-parameter fn 
-;  (lambda (stx)
-;    (raise-syntax-error (syntax-e stx) 
-;                        "fn must be used with def; use lambda for anonymous functions")))
+    (syntax-parse stx
+      [(_ id:id . stuff)
+       #:with def-id (format-id #'id "~a-~a" #'def #'id #:source #'id)
+       #:when (bound-as-macro? #'def-id)
+       (syntax/loc stx (def-id . stuff))]
+      [(_ name contents)
+       (syntax/loc stx (define name contents))])))
+(define-syntax def-macro
+  (syntax-rules ()
+    [(_ name (args ... . rest) body0 bodyn ...) 
+     (define-syntax-rule (name args ... . rest) body0 bodyn ...)]))
+(define-syntax def-fn
+  (syntax-rules ()
+    [(_ name (args ... . rest) body0 bodyn ...) 
+     (define (name args ... . rest) body0 bodyn ...)]))
+
 
 ; (FN (args) body ...)
 ; The anonymous function 
@@ -193,15 +202,21 @@
 ; (SELECT CASE test [test-result op1] ... [else opn])
 ; Multiple conditional block: COND-style, or CASE style with CASE.
 (define-syntax select
-  (syntax-rules (case)   
-    [(select case expr ((result1 ...) op1) ... (else opn)) 
-     (rkt:case expr [(result1 ...) op1] ... (else opn))]
-    [(select (test op1) ... (else opn)) 
-     (cond [test op1] ... (else opn))]))
-
-(define-syntax-parameter case
   (lambda (stx)
-    (raise-syntax-error (syntax-e stx) "case can only be used with select")))
+    (syntax-parse stx
+      [(_ id:id . stuff)
+       #:with select-id (format-id #'id "~a-~a" #'select #'id #:source #'id)
+       #:when (bound-as-macro? #'select-id)
+       (syntax/loc stx (select-id . stuff))]
+      [(select (test op1) ... (else opn))
+       (syntax/loc stx (cond [test op1] ... (else opn)))])))
+
+(define-syntax select-case
+  (syntax-rules (else)
+    [(select-case expr ((result1 ...) op1) ...)
+     (rkt:case expr [(result1 ...) op1] ...)]
+    [(select-case expr ((result1 ...) op1) ... (else opn))
+     (rkt:case expr [(result1 ...) op1] ... (else opn))]))
 
 ;; I/O
 
@@ -209,15 +224,15 @@
 ; PRINT & -> display
 ; PRINT -> displayln
 (define-syntax print
-  (syntax-rules (lit &)
-    [(_ lit datum) (write datum)]
-    [(_ & datum) (display datum)]
-    [(_ datum) (displayln datum)]
-    [(_) (newline)]))
-
-(define-syntax-parameter lit 
-  (lambda (stx)
-    (raise-syntax-error (syntax-e stx) "lit can only be used with print")))
+  (syntax-parser
+    [(_ id:id . stuff)
+     #:with print-id (format-id #'id "~a-~a" #'print #'id #:source #'id)
+     #:when (bound-as-macro? #'print-id)
+     #'(print-id . stuff)]
+    [(_ datum) #'(displayln datum)]
+    [(_) #'(newline)]))
+(define-syntax-rule (print-lit datum) (write datum))
+(define-syntax-rule (print-& datum) (display datum))
 
 ; ? (shortcut for print)
 (define-syntax ?
@@ -227,14 +242,14 @@
 ; INPUT -> read-line (current-input-port)
 ; INPUT STX -> read
 (define-syntax input
-  (syntax-rules (stx)
-    [(_ stx) (read)]
-    [(_ str) (begin (display str) (read-line))]
-    [(_) (read-line)]))
-
-(define-syntax-parameter stx 
-  (lambda (stx)
-    (raise-syntax-error (syntax-e stx) "stx can only be used with input")))
+  (syntax-parser
+    [(_ id:id . stuff)
+     #:with input-id (format-id #'id "~a-~a" #'input #'id #:source #'id)
+     #:when (bound-as-macro? #'input-id)
+     #'(input-id . stuff)]
+    [(_ str) #'(begin (display str) (read-line))]
+    [(_) #'(read-line)]))
+(define-syntax-rule (input-stx) (read))
 
 ;; Strings
 
